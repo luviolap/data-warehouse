@@ -1,0 +1,219 @@
+erDiagram
+    ETL_CONTROL ||--o{ DIM_TIME : "controls"
+    ETL_CONTROL ||--o{ DIM_SERVICE : "controls"
+    ETL_CONTROL ||--o{ DIM_PORT : "controls"
+    ETL_CONTROL ||--o{ DIM_STATE : "controls"
+    ETL_CONTROL ||--o{ DIM_PROTOCOL : "controls"
+    ETL_CONTROL ||--o{ DIM_ATTACK : "controls"
+    ETL_CONTROL ||--o{ FACT_CONNECTION : "controls"
+    ETL_CONTROL ||--o{ FACT_HOURLY_TRAFFIC : "controls"
+    ETL_CONTROL ||--o{ FACT_DAILY_TRAFFIC : "controls"
+    ETL_CONTROL ||--o{ FACT_MONTHLY_TRAFFIC : "controls"
+    ETL_CONTROL ||--o{ FACT_SERVICE_STATS : "controls"
+    ETL_CONTROL ||--o{ FACT_PORT_USAGE : "controls"
+
+    DIM_TIME ||--|{ FACT_CONNECTION : "dimensions"
+    DIM_SERVICE ||--|{ FACT_CONNECTION : "dimensions"
+    DIM_PORT ||--|{ FACT_CONNECTION : "source_port"
+    DIM_PORT ||--|{ FACT_CONNECTION : "dest_port"
+    DIM_STATE ||--|{ FACT_CONNECTION : "dimensions"
+    DIM_PROTOCOL ||--|{ FACT_CONNECTION : "dimensions"
+    DIM_ATTACK ||--|{ FACT_CONNECTION : "dimensions"
+
+    DIM_TIME ||--|{ FACT_HOURLY_TRAFFIC : "dimensions"
+    DIM_SERVICE ||--|{ FACT_HOURLY_TRAFFIC : "dimensions"
+    DIM_PROTOCOL ||--|{ FACT_HOURLY_TRAFFIC : "dimensions"
+    DIM_ATTACK ||--|{ FACT_HOURLY_TRAFFIC : "dimensions"
+
+    DIM_TIME ||--|{ FACT_DAILY_TRAFFIC : "dimensions"
+    DIM_SERVICE ||--|{ FACT_DAILY_TRAFFIC : "dimensions"
+    DIM_PROTOCOL ||--|{ FACT_DAILY_TRAFFIC : "dimensions"
+    DIM_ATTACK ||--|{ FACT_DAILY_TRAFFIC : "dimensions"
+
+    DIM_TIME ||--|{ FACT_MONTHLY_TRAFFIC : "dimensions"
+    DIM_SERVICE ||--|{ FACT_MONTHLY_TRAFFIC : "dimensions"
+    DIM_PROTOCOL ||--|{ FACT_MONTHLY_TRAFFIC : "dimensions"
+    DIM_ATTACK ||--|{ FACT_MONTHLY_TRAFFIC : "dimensions"
+
+    DIM_TIME ||--|{ FACT_SERVICE_STATS : "dimensions"
+    DIM_SERVICE ||--|{ FACT_SERVICE_STATS : "dimensions"
+    DIM_PROTOCOL ||--|{ FACT_SERVICE_STATS : "dimensions"
+    DIM_ATTACK ||--|{ FACT_SERVICE_STATS : "dimensions"
+
+    DIM_TIME ||--|{ FACT_PORT_USAGE : "dimensions"
+    DIM_SERVICE ||--|{ FACT_PORT_USAGE : "dimensions"
+    DIM_PORT ||--|{ FACT_PORT_USAGE : "dimensions"
+    DIM_PROTOCOL ||--|{ FACT_PORT_USAGE : "dimensions"
+    DIM_ATTACK ||--|{ FACT_PORT_USAGE : "dimensions"
+
+    ETL_CONTROL {
+        bigint batch_id PK
+        timestamp start_time
+        timestamp end_time
+        varchar status
+        varchar aggregation_level
+        integer records_processed
+        text error_message
+        timestamp created_at
+    }
+
+    DIM_TIME {
+        integer time_id PK
+        timestamp datetime
+        integer hour
+        integer day
+        integer month
+        integer year
+        varchar day_type
+        varchar day_name
+        varchar month_name
+        boolean is_business_hour
+        boolean is_peak_hour
+        integer week_of_year
+        integer quarter
+        bigint batch_id FK
+    }
+
+    DIM_SERVICE {
+        integer service_id PK
+        varchar name
+        varchar protocol
+        varchar service_type
+        varchar category
+        varchar risk_level
+        text description
+        boolean is_active
+        timestamp valid_from
+        timestamp valid_to
+        integer version
+        bigint batch_id FK
+    }
+
+    DIM_PORT {
+        integer port_id PK
+        integer port_number
+        varchar range_type
+        varchar default_service
+        boolean is_active
+        timestamp valid_from
+        timestamp valid_to
+        integer version
+        bigint batch_id FK
+    }
+
+    DIM_STATE {
+        integer state_id PK
+        varchar name
+        varchar category
+        boolean is_active
+        text description
+        bigint batch_id FK
+    }
+
+    DIM_PROTOCOL {
+        integer protocol_id PK
+        varchar name
+        varchar type
+        text description
+        boolean is_active
+        bigint batch_id FK
+    }
+
+    DIM_ATTACK {
+        integer attack_id PK
+        varchar category
+        boolean is_attack
+        integer severity
+        text description
+        boolean is_active
+        bigint batch_id FK
+    }
+
+    FACT_CONNECTION {
+        bigserial connection_id PK
+        integer time_id FK
+        integer service_id FK
+        integer source_port_id FK
+        integer dest_port_id FK
+        integer state_id FK
+        integer protocol_id FK
+        integer attack_id FK
+        numeric duration
+        bigint source_bytes
+        bigint dest_bytes
+        integer source_packets
+        integer dest_packets
+        numeric source_load
+        numeric dest_load
+        bigint batch_id FK
+    }
+
+    FACT_HOURLY_TRAFFIC {
+        bigserial hourly_traffic_id PK
+        integer time_id FK
+        integer service_id FK
+        integer protocol_id FK
+        integer attack_id FK
+        integer total_connections
+        integer normal_connections
+        integer attack_connections
+        numeric avg_duration
+        numeric avg_bytes_per_conn
+        numeric avg_load
+        bigint batch_id FK
+    }
+
+    FACT_DAILY_TRAFFIC {
+        bigserial daily_traffic_id PK
+        integer time_id FK
+        integer service_id FK
+        integer protocol_id FK
+        integer attack_id FK
+        integer total_connections
+        integer attack_connections
+        numeric attack_percentage
+        integer peak_hour
+        bigint batch_id FK
+    }
+
+    FACT_MONTHLY_TRAFFIC {
+        bigserial monthly_traffic_id PK
+        integer time_id FK
+        integer service_id FK
+        integer protocol_id FK
+        integer attack_id FK
+        integer total_connections
+        integer attack_connections
+        numeric attack_percentage
+        integer peak_day
+        bigint batch_id FK
+    }
+
+    FACT_SERVICE_STATS {
+        bigserial service_stats_id PK
+        integer service_id FK
+        integer time_id FK
+        integer protocol_id FK
+        integer attack_id FK
+        integer total_connections
+        integer attack_connections
+        numeric attack_percentage
+        numeric avg_duration
+        bigint batch_id FK
+    }
+
+    FACT_PORT_USAGE {
+        bigserial port_usage_id PK
+        integer port_id FK
+        integer service_id FK
+        integer protocol_id FK
+        integer attack_id FK
+        integer time_id FK
+        integer total_usage
+        integer attack_usage
+        numeric attack_percentage
+        boolean exclusive_to_attacks
+        timestamp first_seen
+        timestamp last_seen
+        bigint batch_id FK
+    }
