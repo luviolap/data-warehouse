@@ -292,64 +292,68 @@ CREATE TABLE FACT_PORT_USAGE (
 -- Comprehensive Indexing Strategy
 
 -- Time Dimension Indexes
-CREATE INDEX idx_time_components ON DIM_TIME (year, month, day, hour);
-CREATE INDEX idx_time_business ON DIM_TIME (is_business_hour) WHERE is_business_hour = TRUE;
-CREATE INDEX idx_time_peak ON DIM_TIME (is_peak_hour) WHERE is_peak_hour = TRUE;
-CREATE INDEX idx_time_day_type ON DIM_TIME (day_type);
+CREATE INDEX IF NOT EXISTS idx_time_components ON DIM_TIME (year, month, day, hour);
+CREATE INDEX IF NOT EXISTS idx_time_business ON DIM_TIME (is_business_hour) WHERE is_business_hour = TRUE;
+CREATE INDEX IF NOT EXISTS idx_time_peak ON DIM_TIME (is_peak_hour) WHERE is_peak_hour = TRUE;
+CREATE INDEX IF NOT EXISTS idx_time_day_type ON DIM_TIME (day_type);
 
 -- Service Dimension Indexes
-CREATE INDEX idx_service_active ON DIM_SERVICE(service_id) WHERE is_active = TRUE;
-CREATE INDEX idx_service_risk ON DIM_SERVICE(risk_level, is_active);
-CREATE INDEX idx_service_category ON DIM_SERVICE(category, service_type, is_active);
-CREATE INDEX idx_service_temporal ON DIM_SERVICE(valid_from, valid_to) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_service_active ON DIM_SERVICE(service_id) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_service_risk ON DIM_SERVICE(risk_level, is_active);
+CREATE INDEX IF NOT EXISTS idx_service_category ON DIM_SERVICE(category, service_type, is_active);
+CREATE INDEX IF NOT EXISTS idx_service_temporal ON DIM_SERVICE(valid_from, valid_to) WHERE is_active = TRUE;
 
 -- Port Dimension Indexes
-CREATE INDEX idx_port_number ON DIM_PORT(port_number) WHERE is_active = TRUE;
-CREATE INDEX idx_port_range ON DIM_PORT(range_type, is_active);
-CREATE INDEX idx_port_temporal ON DIM_PORT(valid_from, valid_to) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_port_number ON DIM_PORT(port_number) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_port_range ON DIM_PORT(range_type, is_active);
+CREATE INDEX IF NOT EXISTS idx_port_temporal ON DIM_PORT(valid_from, valid_to) WHERE is_active = TRUE;
 
 -- Attack Pattern Indexes
-CREATE INDEX idx_attack_severity ON DIM_ATTACK(severity, is_active);
-CREATE INDEX idx_attack_category ON DIM_ATTACK(category) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_attack_severity ON DIM_ATTACK(severity, is_active);
+CREATE INDEX IF NOT EXISTS idx_attack_category ON DIM_ATTACK(category) WHERE is_active = TRUE;
 
 -- Connection Fact Indexes
-CREATE INDEX idx_conn_time_service ON FACT_CONNECTION(time_id, service_id);
-CREATE INDEX idx_conn_service_attack ON FACT_CONNECTION(service_id, attack_id);
-CREATE INDEX idx_conn_ports ON FACT_CONNECTION(source_port_id, dest_port_id);
-CREATE INDEX idx_conn_metrics ON FACT_CONNECTION(duration, source_bytes + dest_bytes, source_packets + dest_packets);
-CREATE INDEX idx_conn_analysis ON FACT_CONNECTION(time_id, service_id, attack_id) 
+CREATE INDEX IF NOT EXISTS idx_conn_time_service ON FACT_CONNECTION(time_id, service_id);
+CREATE INDEX IF NOT EXISTS idx_conn_service_attack ON FACT_CONNECTION(service_id, attack_id);
+CREATE INDEX IF NOT EXISTS idx_conn_ports ON FACT_CONNECTION(source_port_id, dest_port_id);
+CREATE INDEX IF NOT EXISTS idx_conn_duration ON FACT_CONNECTION(duration);
+CREATE INDEX IF NOT EXISTS idx_conn_bytes ON FACT_CONNECTION(source_bytes, dest_bytes);
+CREATE INDEX IF NOT EXISTS idx_conn_packets ON FACT_CONNECTION(source_packets, dest_packets);
+CREATE INDEX IF NOT EXISTS idx_conn_total_bytes ON FACT_CONNECTION((source_bytes + dest_bytes));
+CREATE INDEX IF NOT EXISTS idx_conn_total_packets ON FACT_CONNECTION((source_packets + dest_packets));
+CREATE INDEX IF NOT EXISTS idx_conn_analysis ON FACT_CONNECTION(time_id, service_id, attack_id) 
     INCLUDE (duration, source_bytes, dest_bytes);
 
 -- Hourly Traffic Indexes
-CREATE INDEX idx_hourly_time_service ON FACT_HOURLY_TRAFFIC(time_id, service_id);
-CREATE INDEX idx_hourly_attack_pattern ON FACT_HOURLY_TRAFFIC(service_id, attack_id, time_id) 
+CREATE INDEX IF NOT EXISTS idx_hourly_time_service ON FACT_HOURLY_TRAFFIC(time_id, service_id);
+CREATE INDEX IF NOT EXISTS idx_hourly_attack_pattern ON FACT_HOURLY_TRAFFIC(service_id, attack_id, time_id) 
     WHERE attack_connections > 0;
-CREATE INDEX idx_hourly_volume ON FACT_HOURLY_TRAFFIC(total_connections DESC);
+CREATE INDEX IF NOT EXISTS idx_hourly_volume ON FACT_HOURLY_TRAFFIC(total_connections DESC);
 
 -- Daily Traffic Indexes
-CREATE INDEX idx_daily_time_service ON FACT_DAILY_TRAFFIC(time_id, service_id);
-CREATE INDEX idx_daily_attack_pattern ON FACT_DAILY_TRAFFIC(service_id, attack_id) 
+CREATE INDEX IF NOT EXISTS idx_daily_time_service ON FACT_DAILY_TRAFFIC(time_id, service_id);
+CREATE INDEX IF NOT EXISTS idx_daily_attack_pattern ON FACT_DAILY_TRAFFIC(service_id, attack_id) 
     WHERE attack_percentage > 10;
-CREATE INDEX idx_daily_peak ON FACT_DAILY_TRAFFIC(peak_hour_connections DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_peak ON FACT_DAILY_TRAFFIC(peak_hour_connections DESC);
 
 -- Monthly Traffic Indexes
-CREATE INDEX idx_monthly_time_service ON FACT_MONTHLY_TRAFFIC(time_id, service_id);
-CREATE INDEX idx_monthly_attack_trend ON FACT_MONTHLY_TRAFFIC(service_id, attack_id) 
+CREATE INDEX IF NOT EXISTS idx_monthly_time_service ON FACT_MONTHLY_TRAFFIC(time_id, service_id);
+CREATE INDEX IF NOT EXISTS idx_monthly_attack_trend ON FACT_MONTHLY_TRAFFIC(service_id, attack_id) 
     WHERE distinct_attack_types > 1;
-CREATE INDEX idx_monthly_volume ON FACT_MONTHLY_TRAFFIC(total_connections DESC);
+CREATE INDEX IF NOT EXISTS idx_monthly_volume ON FACT_MONTHLY_TRAFFIC(total_connections DESC);
 
 -- Service Stats Indexes
-CREATE INDEX idx_stats_service_time ON FACT_SERVICE_STATS(service_id, time_id);
-CREATE INDEX idx_stats_attack_analysis ON FACT_SERVICE_STATS(attack_percentage DESC, service_id)
+CREATE INDEX IF NOT EXISTS idx_stats_service_time ON FACT_SERVICE_STATS(service_id, time_id);
+CREATE INDEX IF NOT EXISTS idx_stats_attack_analysis ON FACT_SERVICE_STATS(attack_percentage DESC, service_id)
     INCLUDE (distinct_attack_types, exclusive_attack_ports);
-CREATE INDEX idx_stats_performance ON FACT_SERVICE_STATS(service_id, time_id)
+CREATE INDEX IF NOT EXISTS idx_stats_performance ON FACT_SERVICE_STATS(service_id, time_id)
     INCLUDE (avg_duration_normal, avg_duration_attack, bytes_ratio);
 
 -- Port Usage Indexes
-CREATE INDEX idx_port_usage_analysis ON FACT_PORT_USAGE(port_id, service_id, time_id);
-CREATE INDEX idx_port_attack_pattern ON FACT_PORT_USAGE(attack_percentage DESC)
+CREATE INDEX IF NOT EXISTS idx_port_usage_analysis ON FACT_PORT_USAGE(port_id, service_id, time_id);
+CREATE INDEX IF NOT EXISTS idx_port_attack_pattern ON FACT_PORT_USAGE(attack_percentage DESC)
     WHERE exclusive_to_attacks = TRUE;
-CREATE INDEX idx_port_temporal ON FACT_PORT_USAGE(first_seen, last_seen);
+CREATE INDEX IF NOT EXISTS idx_port_temporal ON FACT_PORT_USAGE(first_seen, last_seen);
 
 -- Materialized Views for Common Analysis Patterns
 
@@ -363,7 +367,7 @@ SELECT
     t.is_business_hour,
     SUM(ht.total_connections) as total_connections,
     SUM(ht.attack_connections) as attack_connections,
-    AVG(ht.attack_percentage) as avg_attack_percentage,
+    ROUND(100.0 * SUM(ht.attack_connections) / NULLIF(SUM(ht.total_connections), 0), 2) as avg_attack_percentage,
     SUM(ht.total_bytes_normal + ht.total_bytes_attack) as total_bytes,
     AVG(ht.avg_duration) as avg_duration
 FROM FACT_HOURLY_TRAFFIC ht
