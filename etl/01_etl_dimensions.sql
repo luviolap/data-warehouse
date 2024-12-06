@@ -1,5 +1,5 @@
 -- Network Security Data Mart - Dimension ETL
--- Version: 1.0
+-- Version: 1.1
 -- For UNSW-NB15 Dataset
 
 -- Initialize ETL Control
@@ -31,6 +31,10 @@ CREATE OR REPLACE PROCEDURE populate_time_dimension(
 DECLARE
     v_current_date TIMESTAMP;
 BEGIN
+    -- Create sequence if it doesn't exist
+    DROP SEQUENCE IF EXISTS time_id_seq;
+    CREATE SEQUENCE time_id_seq START WITH 1;
+
     v_current_date := p_start_date;
     
     WHILE v_current_date <= p_end_date LOOP
@@ -50,7 +54,7 @@ BEGIN
             quarter,
             batch_id
         ) VALUES (
-            EXTRACT(EPOCH FROM v_current_date)::INTEGER,
+            nextval('time_id_seq'),
             v_current_date,
             EXTRACT(HOUR FROM v_current_date),
             EXTRACT(DAY FROM v_current_date),
@@ -86,6 +90,10 @@ CREATE OR REPLACE PROCEDURE populate_service_dimension(
     p_batch_id BIGINT
 ) LANGUAGE plpgsql AS $$
 BEGIN
+    -- Create sequence if it doesn't exist
+    DROP SEQUENCE IF EXISTS service_id_seq;
+    CREATE SEQUENCE service_id_seq START WITH 1;
+
     -- Insert default service if not exists
     INSERT INTO DIM_SERVICE (
         service_id,
@@ -109,6 +117,7 @@ BEGIN
 
     -- Insert services from source data
     INSERT INTO DIM_SERVICE (
+        service_id,
         name,
         protocol,
         service_type,
@@ -118,6 +127,7 @@ BEGIN
         batch_id
     )
     SELECT DISTINCT
+        nextval('service_id_seq'),
         COALESCE(service, 'UNKNOWN'),
         proto,
         'NETWORK',  -- Default service_type
@@ -134,7 +144,8 @@ BEGIN
         END,
         'Service extracted from UNSW-NB15 dataset',
         p_batch_id
-    FROM source_data
+    FROM staging.source_data
+    WHERE service IS NOT NULL
     ON CONFLICT (name, valid_from, version) DO NOTHING;
 END;
 $$;
@@ -144,6 +155,10 @@ CREATE OR REPLACE PROCEDURE populate_protocol_dimension(
     p_batch_id BIGINT
 ) LANGUAGE plpgsql AS $$
 BEGIN
+    -- Create sequence if it doesn't exist
+    DROP SEQUENCE IF EXISTS protocol_id_seq;
+    CREATE SEQUENCE protocol_id_seq START WITH 1;
+
     -- Insert default protocol
     INSERT INTO DIM_PROTOCOL (
         protocol_id,
@@ -161,12 +176,14 @@ BEGIN
 
     -- Insert protocols from source data
     INSERT INTO DIM_PROTOCOL (
+        protocol_id,
         name,
         type,
         description,
         batch_id
     )
     SELECT DISTINCT
+        nextval('protocol_id_seq'),
         proto,
         CASE 
             WHEN proto IN ('tcp', 'udp') THEN 'TRANSPORT'
@@ -175,7 +192,8 @@ BEGIN
         END,
         'Protocol extracted from UNSW-NB15 dataset',
         p_batch_id
-    FROM source_data
+    FROM staging.source_data
+    WHERE proto IS NOT NULL
     ON CONFLICT (name) DO NOTHING;
 END;
 $$;
@@ -185,6 +203,10 @@ CREATE OR REPLACE PROCEDURE populate_state_dimension(
     p_batch_id BIGINT
 ) LANGUAGE plpgsql AS $$
 BEGIN
+    -- Create sequence if it doesn't exist
+    DROP SEQUENCE IF EXISTS state_id_seq;
+    CREATE SEQUENCE state_id_seq START WITH 1;
+
     -- Insert default state
     INSERT INTO DIM_STATE (
         state_id,
@@ -202,12 +224,14 @@ BEGIN
 
     -- Insert states from source data
     INSERT INTO DIM_STATE (
+        state_id,
         name,
         category,
         description,
         batch_id
     )
     SELECT DISTINCT
+        nextval('state_id_seq'),
         state,
         CASE 
             WHEN state IN ('CON', 'INT') THEN 'CONNECTION'
@@ -216,7 +240,8 @@ BEGIN
         END,
         'Connection state from UNSW-NB15 dataset',
         p_batch_id
-    FROM source_data
+    FROM staging.source_data
+    WHERE state IS NOT NULL
     ON CONFLICT (name) DO NOTHING;
 END;
 $$;
@@ -226,29 +251,46 @@ CREATE OR REPLACE PROCEDURE populate_port_dimension(
     p_batch_id BIGINT
 ) LANGUAGE plpgsql AS $$
 BEGIN
+    -- Create sequence if it doesn't exist
+    DROP SEQUENCE IF EXISTS port_id_seq;
+    CREATE SEQUENCE port_id_seq START WITH 1;
+
     -- Insert default port
     INSERT INTO DIM_PORT (
         port_id,
         port_number,
         range_type,
         default_service,
+        is_active,
+        valid_from,
+        version,
         batch_id
     ) VALUES (
         0,
         0,
         'UNKNOWN',
         'UNKNOWN',
+        TRUE,
+        CURRENT_TIMESTAMP,
+        1,
         p_batch_id
     ) ON CONFLICT (port_number, valid_from, version) DO NOTHING;
+    
+    RAISE NOTICE 'Default port inserted successfully';
 
     -- Insert source ports
     INSERT INTO DIM_PORT (
+        port_id,
         port_number,
         range_type,
         default_service,
+        is_active,
+        valid_from,
+        version,
         batch_id
     )
     SELECT DISTINCT
+        nextval('port_id_seq'),
         sport,
         CASE 
             WHEN sport < 1024 THEN 'SYSTEM'
@@ -256,18 +298,29 @@ BEGIN
             ELSE 'DYNAMIC'
         END,
         COALESCE(service, 'UNKNOWN'),
+        TRUE,
+        CURRENT_TIMESTAMP,
+        1,
         p_batch_id
-    FROM source_data
+    FROM staging.source_data
+    WHERE sport IS NOT NULL
     ON CONFLICT (port_number, valid_from, version) DO NOTHING;
+    
+    RAISE NOTICE 'Source ports inserted successfully';
 
     -- Insert destination ports
     INSERT INTO DIM_PORT (
+        port_id,
         port_number,
         range_type,
         default_service,
+        is_active,
+        valid_from,
+        version,
         batch_id
     )
     SELECT DISTINCT
+        nextval('port_id_seq'),
         dsport,
         CASE 
             WHEN dsport < 1024 THEN 'SYSTEM'
@@ -275,9 +328,15 @@ BEGIN
             ELSE 'DYNAMIC'
         END,
         COALESCE(service, 'UNKNOWN'),
+        TRUE,
+        CURRENT_TIMESTAMP,
+        1,
         p_batch_id
-    FROM source_data
+    FROM staging.source_data
+    WHERE dsport IS NOT NULL
     ON CONFLICT (port_number, valid_from, version) DO NOTHING;
+    
+    RAISE NOTICE 'Destination ports inserted successfully';
 END;
 $$;
 
@@ -286,13 +345,18 @@ CREATE OR REPLACE PROCEDURE populate_attack_dimension(
     p_batch_id BIGINT
 ) LANGUAGE plpgsql AS $$
 BEGIN
-    -- Insert default attack category
+    -- Create sequence if it doesn't exist
+    DROP SEQUENCE IF EXISTS attack_id_seq;
+    CREATE SEQUENCE attack_id_seq START WITH 1;
+
+    -- Insert default attack category (normal traffic)
     INSERT INTO DIM_ATTACK (
         attack_id,
         category,
         is_attack,
         severity,
         description,
+        is_active,
         batch_id
     ) VALUES (
         0,
@@ -300,20 +364,24 @@ BEGIN
         FALSE,
         1,
         'Normal traffic, no attack detected',
+        TRUE,
         p_batch_id
     ) ON CONFLICT (category) DO NOTHING;
 
     -- Insert attack categories from source data
     INSERT INTO DIM_ATTACK (
+        attack_id,
         category,
         is_attack,
         severity,
         description,
+        is_active,
         batch_id
     )
     SELECT DISTINCT
+        nextval('attack_id_seq'),
         COALESCE(attack_cat, 'NORMAL'),
-        CASE WHEN attack_cat IS NOT NULL THEN TRUE ELSE FALSE END,
+        CASE WHEN attack_cat IS NOT NULL AND attack_cat != '' THEN TRUE ELSE FALSE END,
         CASE 
             WHEN attack_cat IN ('Backdoors', 'Shellcode', 'Worms') THEN 5
             WHEN attack_cat IN ('DoS', 'Exploits') THEN 4
@@ -322,9 +390,13 @@ BEGIN
             ELSE 1
         END,
         'Attack category from UNSW-NB15 dataset',
+        TRUE,
         p_batch_id
-    FROM source_data
+    FROM staging.source_data
+    WHERE attack_cat IS NOT NULL AND attack_cat != ''
     ON CONFLICT (category) DO NOTHING;
+    
+    RAISE NOTICE 'Attack categories populated successfully';
 END;
 $$;
 
@@ -369,3 +441,34 @@ BEGIN
     END;
 END;
 $$;
+
+-- Alter the check constraint to include 'UNKNOWN'
+ALTER TABLE DIM_PORT DROP CONSTRAINT IF EXISTS dim_port_range_type_check;
+ALTER TABLE DIM_PORT ADD CONSTRAINT dim_port_range_type_check 
+    CHECK (range_type IN ('SYSTEM', 'USER', 'DYNAMIC', 'UNKNOWN'));
+
+-- Execute the dimension loading process
+CALL etl_load_dimensions(
+    'UNSW-NB15',                    -- source system name
+    '2024-01-01 00:00:00'::timestamp,  -- start date
+    '2024-12-31 23:59:59'::timestamp   -- end date
+);
+
+-- Check counts and sample data from each dimension
+SELECT 'DIM_TIME' as dimension, COUNT(*) as record_count FROM DIM_TIME
+UNION ALL
+SELECT 'DIM_SERVICE', COUNT(*) FROM DIM_SERVICE WHERE is_active = true
+UNION ALL
+SELECT 'DIM_PROTOCOL', COUNT(*) FROM DIM_PROTOCOL WHERE is_active = true
+UNION ALL
+SELECT 'DIM_STATE', COUNT(*) FROM DIM_STATE WHERE is_active = true
+UNION ALL
+SELECT 'DIM_PORT', COUNT(*) FROM DIM_PORT WHERE is_active = true
+UNION ALL
+SELECT 'DIM_ATTACK', COUNT(*) FROM DIM_ATTACK WHERE is_active = true;
+
+-- Check ETL_CONTROL status
+SELECT batch_id, start_time, end_time, status, error_message 
+FROM ETL_CONTROL 
+ORDER BY batch_id DESC 
+LIMIT 1;

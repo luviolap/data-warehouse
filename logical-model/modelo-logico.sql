@@ -443,3 +443,72 @@ CREATE INDEX idx_mv_hourly_perf_service ON MV_HOURLY_SERVICE_PERFORMANCE(service
 CREATE INDEX idx_mv_attack_patterns_service ON MV_DAILY_ATTACK_PATTERNS(service_name, attack_category);
 CREATE INDEX idx_mv_risk_profile_level ON MV_SERVICE_RISK_PROFILE(risk_level, avg_attack_percentage DESC);
 CREATE INDEX idx_mv_port_security_attack ON MV_PORT_SECURITY_ANALYSIS(avg_attack_percentage DESC);
+
+-- Create partitions for fact tables
+DO $$
+DECLARE
+    v_year INTEGER := 2015;
+    v_month INTEGER := 1;
+    v_start_time TIMESTAMP;
+    v_end_time TIMESTAMP;
+    v_start_id INTEGER;
+    v_end_id INTEGER;
+    v_partition_name TEXT;
+BEGIN
+    -- Create partitions for January 2015 (since we know our data is from Jan 22, 2015)
+    v_start_time := DATE_TRUNC('month', ('2015-01-01'::date))::timestamp;
+    v_end_time := v_start_time + INTERVAL '1 month';
+    
+    -- Convert timestamps to time_ids (Unix timestamps)
+    v_start_id := EXTRACT(EPOCH FROM v_start_time)::INTEGER;
+    v_end_id := EXTRACT(EPOCH FROM v_end_time)::INTEGER;
+    
+    -- Create partition name with proper zero-padding for month
+    v_partition_name := '_' || v_year || '_' || LPAD(v_month::text, 2, '0');
+    
+    -- Create partition for FACT_HOURLY_TRAFFIC if not exists
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS fact_hourly_traffic%s 
+        PARTITION OF fact_hourly_traffic 
+        FOR VALUES FROM (%s) TO (%s)',
+        v_partition_name, v_start_id, v_end_id
+    );
+
+    -- Create partition for FACT_DAILY_TRAFFIC if not exists
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS fact_daily_traffic%s 
+        PARTITION OF fact_daily_traffic 
+        FOR VALUES FROM (%s) TO (%s)',
+        v_partition_name, v_start_id, v_end_id
+    );
+
+    -- Create partition for FACT_MONTHLY_TRAFFIC if not exists
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS fact_monthly_traffic%s 
+        PARTITION OF fact_monthly_traffic 
+        FOR VALUES FROM (%s) TO (%s)',
+        v_partition_name, v_start_id, v_end_id
+    );
+
+    -- Create partition for FACT_SERVICE_STATS if not exists
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS fact_service_stats%s 
+        PARTITION OF fact_service_stats 
+        FOR VALUES FROM (%s) TO (%s)',
+        v_partition_name, v_start_id, v_end_id
+    );
+
+    -- Create partition for FACT_PORT_USAGE if not exists
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS fact_port_usage%s 
+        PARTITION OF fact_port_usage 
+        FOR VALUES FROM (%s) TO (%s)',
+        v_partition_name, v_start_id, v_end_id
+    );
+
+    RAISE NOTICE 'Created partitions for year % month % (time_id from % to %)', 
+        v_year, v_month, v_start_id, v_end_id;
+
+EXCEPTION WHEN duplicate_table THEN
+    RAISE NOTICE 'Some partitions already exist - continuing...';
+END $$;

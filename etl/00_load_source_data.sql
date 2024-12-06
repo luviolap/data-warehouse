@@ -235,3 +235,19 @@ BEGIN
     RAISE NOTICE '%', (SELECT * FROM staging.data_quality_check);
 END;
 $$;
+
+-- First load the features metadata
+CALL staging.load_features_metadata('/Users/drkp4/Desktop/_itba/warehouse/data-warehouse/data/UNSW-NB15_features.csv');
+
+-- Then load the actual data
+CALL staging.load_source_data('/Users/drkp4/Desktop/_itba/warehouse/data-warehouse/data/UNSW-NB15_head.csv');
+
+-- Check the count of records in staging tables
+SELECT 'Features Metadata' as table_name, COUNT(*) as record_count 
+FROM staging.features_metadata
+UNION ALL
+SELECT 'Source Data', COUNT(*) 
+FROM staging.source_data;
+
+-- Quick look at data quality
+SELECT * FROM staging.data_quality_check;

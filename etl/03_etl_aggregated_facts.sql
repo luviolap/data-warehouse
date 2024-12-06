@@ -1,5 +1,5 @@
 -- Network Security Data Mart - Aggregated Facts ETL
--- Version: 1.0
+-- Version: 1.1
 -- For UNSW-NB15 Dataset
 
 -- Create procedure to aggregate hourly traffic
@@ -41,22 +41,22 @@ BEGIN
         f.protocol_id,
         f.attack_id,
         COUNT(*) as total_connections,
-        COUNT(*) FILTER (WHERE a.is_attack = FALSE) as normal_connections,
-        COUNT(*) FILTER (WHERE a.is_attack = TRUE) as attack_connections,
-        AVG(f.duration) as avg_duration,
-        AVG(f.duration) FILTER (WHERE a.is_attack = FALSE) as avg_duration_normal,
-        AVG(f.duration) FILTER (WHERE a.is_attack = TRUE) as avg_duration_attack,
-        SUM(f.source_bytes + f.dest_bytes) FILTER (WHERE a.is_attack = FALSE) as total_bytes_normal,
-        SUM(f.source_bytes + f.dest_bytes) FILTER (WHERE a.is_attack = TRUE) as total_bytes_attack,
-        SUM(f.source_packets + f.dest_packets) FILTER (WHERE a.is_attack = FALSE) as total_packets_normal,
-        SUM(f.source_packets + f.dest_packets) FILTER (WHERE a.is_attack = TRUE) as total_packets_attack,
-        AVG(f.source_bytes + f.dest_bytes) FILTER (WHERE a.is_attack = FALSE) as avg_bytes_per_conn,
-        AVG(f.source_bytes + f.dest_bytes) FILTER (WHERE a.is_attack = TRUE) as avg_bytes_per_attack,
-        AVG(f.source_load) FILTER (WHERE a.is_attack = FALSE) as avg_load_normal,
-        AVG(f.source_load) FILTER (WHERE a.is_attack = TRUE) as avg_load_attack,
-        COUNT(DISTINCT f.service_id) as distinct_services,
-        COUNT(DISTINCT f.source_port_id) + COUNT(DISTINCT f.dest_port_id) as distinct_ports,
-        MAX(COUNT(*)) OVER (PARTITION BY f.service_id, t.hour) as peak_hour_connections,
+        COALESCE(COUNT(*) FILTER (WHERE a.is_attack = FALSE), 0) as normal_connections,
+        COALESCE(COUNT(*) FILTER (WHERE a.is_attack = TRUE), 0) as attack_connections,
+        COALESCE(AVG(f.duration), 0) as avg_duration,
+        COALESCE(AVG(f.duration) FILTER (WHERE a.is_attack = FALSE), 0) as avg_duration_normal,
+        COALESCE(AVG(f.duration) FILTER (WHERE a.is_attack = TRUE), 0) as avg_duration_attack,
+        COALESCE(SUM(f.source_bytes + f.dest_bytes) FILTER (WHERE a.is_attack = FALSE), 0) as total_bytes_normal,
+        COALESCE(SUM(f.source_bytes + f.dest_bytes) FILTER (WHERE a.is_attack = TRUE), 0) as total_bytes_attack,
+        COALESCE(SUM(f.source_packets + f.dest_packets) FILTER (WHERE a.is_attack = FALSE), 0) as total_packets_normal,
+        COALESCE(SUM(f.source_packets + f.dest_packets) FILTER (WHERE a.is_attack = TRUE), 0) as total_packets_attack,
+        COALESCE(AVG(f.source_bytes + f.dest_bytes) FILTER (WHERE a.is_attack = FALSE), 0) as avg_bytes_per_conn,
+        COALESCE(AVG(f.source_bytes + f.dest_bytes) FILTER (WHERE a.is_attack = TRUE), 0) as avg_bytes_per_attack,
+        COALESCE(AVG(f.source_load) FILTER (WHERE a.is_attack = FALSE), 0) as avg_load_normal,
+        COALESCE(AVG(f.source_load) FILTER (WHERE a.is_attack = TRUE), 0) as avg_load_attack,
+        COALESCE(COUNT(DISTINCT f.service_id), 0) as distinct_services,
+        COALESCE(COUNT(DISTINCT f.source_port_id) + COUNT(DISTINCT f.dest_port_id), 0) as distinct_ports,
+        COALESCE(MAX(COUNT(*)) OVER (PARTITION BY f.service_id, t.hour), 0) as peak_hour_connections,
         p_batch_id
     FROM FACT_CONNECTION f
     JOIN DIM_TIME t ON f.time_id = t.time_id
@@ -259,52 +259,98 @@ CREATE OR REPLACE PROCEDURE etl_aggregate_facts(
     p_end_time TIMESTAMP
 ) LANGUAGE plpgsql AS $$
 DECLARE
-    v_batch_id BIGINT;
+    v_batch_id_hourly BIGINT;
+    v_batch_id_daily BIGINT;
+    v_batch_id_monthly BIGINT;
     v_error_message TEXT;
+    v_record_count INTEGER;
 BEGIN
-    -- Initialize ETL batch
+    -- Initialize ETL batches for each aggregation level
+    -- Initialize hourly batch
     INSERT INTO ETL_CONTROL (
         start_time,
         status,
         source_system,
         aggregation_level
-    ) VALUES (
-        CURRENT_TIMESTAMP,
-        'STARTED',
-        'UNSW-NB15',
-        'AGGREGATED'
-    ) RETURNING batch_id INTO v_batch_id;
+    ) VALUES 
+    (CURRENT_TIMESTAMP, 'STARTED', 'UNSW-NB15', 'HOURLY')
+    RETURNING batch_id INTO v_batch_id_hourly;
+
+    -- Initialize daily batch
+    INSERT INTO ETL_CONTROL (
+        start_time,
+        status,
+        source_system,
+        aggregation_level
+    ) VALUES 
+    (CURRENT_TIMESTAMP, 'STARTED', 'UNSW-NB15', 'DAILY')
+    RETURNING batch_id INTO v_batch_id_daily;
+
+    -- Initialize monthly batch
+    INSERT INTO ETL_CONTROL (
+        start_time,
+        status,
+        source_system,
+        aggregation_level
+    ) VALUES 
+    (CURRENT_TIMESTAMP, 'STARTED', 'UNSW-NB15', 'MONTHLY')
+    RETURNING batch_id INTO v_batch_id_monthly;
 
     -- Process aggregations
     BEGIN
+        -- Debug information
+        RAISE NOTICE 'Date range: % to %', p_start_time, p_end_time;
+        
+        -- Check for source data
+        SELECT COUNT(*) INTO v_record_count 
+        FROM FACT_CONNECTION f
+        JOIN DIM_TIME t ON f.time_id = t.time_id
+        WHERE t.datetime BETWEEN p_start_time AND p_end_time;
+        
+        RAISE NOTICE 'Found % source records in date range', v_record_count;
+        
         -- Hourly aggregations
-        CALL aggregate_hourly_traffic(v_batch_id, p_start_time, p_end_time);
+        CALL aggregate_hourly_traffic(v_batch_id_hourly, p_start_time, p_end_time);
+        
+        -- Update ETL control status for hourly
+        UPDATE ETL_CONTROL 
+        SET status = 'COMPLETED',
+            end_time = CURRENT_TIMESTAMP
+        WHERE batch_id = v_batch_id_hourly;
         
         -- Daily aggregations
-        CALL aggregate_daily_traffic(v_batch_id, p_start_time, p_end_time);
+        CALL aggregate_daily_traffic(v_batch_id_daily, p_start_time, p_end_time);
+        
+        -- Update ETL control status for daily
+        UPDATE ETL_CONTROL 
+        SET status = 'COMPLETED',
+            end_time = CURRENT_TIMESTAMP
+        WHERE batch_id = v_batch_id_daily;
         
         -- Monthly aggregations
-        CALL aggregate_monthly_traffic(v_batch_id, p_start_time, p_end_time);
+        CALL aggregate_monthly_traffic(v_batch_id_monthly, p_start_time, p_end_time);
+        
+        -- Update ETL control status for monthly
+        UPDATE ETL_CONTROL 
+        SET status = 'COMPLETED',
+            end_time = CURRENT_TIMESTAMP
+        WHERE batch_id = v_batch_id_monthly;
         
         -- Refresh materialized views
         CALL REFRESH_MATERIALIZED_VIEWS();
         
-        -- Update ETL control status
-        UPDATE ETL_CONTROL 
-        SET status = 'COMPLETED',
-            end_time = CURRENT_TIMESTAMP
-        WHERE batch_id = v_batch_id;
-        
-        RAISE NOTICE 'Fact aggregation completed successfully';
+        RAISE NOTICE 'Fact aggregation completed successfully for all levels';
         
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_error_message = MESSAGE_TEXT;
         
+        -- Update ETL control status for all levels in case of error
         UPDATE ETL_CONTROL 
         SET status = 'FAILED',
             end_time = CURRENT_TIMESTAMP,
             error_message = v_error_message
-        WHERE batch_id = v_batch_id;
+        WHERE batch_id IN (v_batch_id_hourly, v_batch_id_daily, v_batch_id_monthly)
+          AND status = 'STARTED';
         
         RAISE EXCEPTION 'Fact aggregation failed: %', v_error_message;
     END;
@@ -315,6 +361,7 @@ $$;
 COMMENT ON PROCEDURE etl_aggregate_facts IS 
 $doc$
 Aggregate connection facts into hourly, daily, and monthly summaries.
+Creates separate ETL_CONTROL records for each aggregation level.
 
 Example usage:
 CALL etl_aggregate_facts(
@@ -322,3 +369,8 @@ CALL etl_aggregate_facts(
     '2024-01-31 23:59:59'::TIMESTAMP
 );
 $doc$;
+
+CALL etl_aggregate_facts(
+    '2015-01-22 00:00:00'::TIMESTAMP,
+    '2015-01-22 23:59:59'::TIMESTAMP
+);

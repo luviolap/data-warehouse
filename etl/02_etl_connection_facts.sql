@@ -1,5 +1,5 @@
 -- Network Security Data Mart - Connection Facts ETL
--- Version: 1.0
+-- Version: 1.1
 -- For UNSW-NB15 Dataset
 
 -- Helper function to get or create time_id
@@ -63,6 +63,125 @@ BEGIN
     RETURN v_time_id;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Create procedure to manage partitions
+CREATE OR REPLACE PROCEDURE create_fact_partitions(
+    p_start_time TIMESTAMP,
+    p_end_time TIMESTAMP
+) LANGUAGE plpgsql AS $$
+DECLARE
+    v_start_id INTEGER;
+    v_end_id INTEGER;
+    v_partition_name TEXT;
+    v_current_start TIMESTAMP;
+    v_current_end TIMESTAMP;
+BEGIN
+    -- Create monthly partitions
+    v_current_start := date_trunc('month', p_start_time);
+    WHILE v_current_start < p_end_time LOOP
+        v_current_end := v_current_start + INTERVAL '1 month';
+        
+        -- Calculate partition bounds
+        v_start_id := EXTRACT(EPOCH FROM v_current_start)::INTEGER;
+        v_end_id := EXTRACT(EPOCH FROM v_current_end)::INTEGER;
+        
+        -- Create partition name
+        v_partition_name := 'fact_connection_' || to_char(v_current_start, 'YYYY_MM');
+        
+        -- Create partition if it doesn't exist
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = lower(v_partition_name)
+            AND n.nspname = current_schema()
+        ) THEN
+            EXECUTE format(
+                'CREATE TABLE %I PARTITION OF fact_connection
+                FOR VALUES FROM (%L) TO (%L)',
+                v_partition_name, v_start_id, v_end_id
+            );
+            
+            RAISE NOTICE 'Created partition % for range % to %',
+                v_partition_name, v_current_start, v_current_end;
+        END IF;
+        
+        v_current_start := v_current_end;
+    END LOOP;
+END;
+$$;
+
+-- Create procedure to manage indexes
+CREATE OR REPLACE PROCEDURE manage_connection_fact_indexes(
+    p_batch_id BIGINT
+) LANGUAGE plpgsql AS $$
+BEGIN
+    -- Drop existing batch-specific indexes if they exist
+    DROP INDEX IF EXISTS idx_conn_time_range_active;
+    DROP INDEX IF EXISTS idx_conn_service_metrics_active;
+    DROP INDEX IF EXISTS idx_conn_attack_analysis_active;
+    DROP INDEX IF EXISTS idx_conn_protocol_service_active;
+
+    -- Create new partial indexes for the current batch
+    EXECUTE format(
+        'CREATE INDEX idx_conn_time_range_active ON FACT_CONNECTION (time_id, service_id) WHERE batch_id = %L',
+        p_batch_id
+    );
+
+    EXECUTE format(
+        'CREATE INDEX idx_conn_service_metrics_active ON FACT_CONNECTION (service_id) 
+         INCLUDE (duration, source_bytes, dest_bytes) WHERE batch_id = %L',
+        p_batch_id
+    );
+
+    EXECUTE format(
+        'CREATE INDEX idx_conn_attack_analysis_active ON FACT_CONNECTION (attack_id, time_id)
+         INCLUDE (duration, source_bytes, dest_bytes) WHERE batch_id = %L',
+        p_batch_id
+    );
+
+    EXECUTE format(
+        'CREATE INDEX idx_conn_protocol_service_active ON FACT_CONNECTION (protocol_id, service_id)
+         INCLUDE (duration) WHERE batch_id = %L',
+        p_batch_id
+    );
+    
+    -- Create general indexes if they don't exist
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_conn_time_range') THEN
+        CREATE INDEX idx_conn_time_range ON FACT_CONNECTION (time_id, service_id);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_conn_service_metrics') THEN
+        CREATE INDEX idx_conn_service_metrics ON FACT_CONNECTION (service_id)
+        INCLUDE (duration, source_bytes, dest_bytes);
+    END IF;
+END;
+$$;
+
+-- Create procedure to initialize fact tables
+CREATE OR REPLACE PROCEDURE initialize_fact_tables(
+    p_start_time TIMESTAMP,
+    p_end_time TIMESTAMP
+) LANGUAGE plpgsql AS $$
+BEGIN
+    -- Create partitions for FACT_CONNECTION
+    CALL create_fact_partitions(p_start_time, p_end_time);
+    
+    -- Create default partition for any data outside the range
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relname = 'fact_connection_default'
+        AND n.nspname = current_schema()
+    ) THEN
+        CREATE TABLE fact_connection_default 
+        PARTITION OF fact_connection DEFAULT;
+        
+        RAISE NOTICE 'Created default partition for fact_connection';
+    END IF;
+END;
+$$;
 
 -- Main ETL procedure for connection facts
 CREATE OR REPLACE PROCEDURE etl_load_connection_facts(
@@ -171,10 +290,10 @@ BEGIN
         v_offset := v_offset + p_batch_size;
         
         RAISE NOTICE 'Processed % of % records', LEAST(v_offset, v_total), v_total;
-        
-        -- Commit batch
-        COMMIT;
     END LOOP;
+    
+    -- Create indexes for the current batch
+    CALL manage_connection_fact_indexes(v_batch_id);
     
     -- Update ETL control record
     UPDATE ETL_CONTROL 
@@ -239,25 +358,10 @@ BEGIN
 END;
 $$;
 
--- Create indexes optimized for connection analysis
-CREATE INDEX idx_conn_time_range ON FACT_CONNECTION (time_id, service_id)
-WHERE batch_id IN (
-    SELECT batch_id 
-    FROM ETL_CONTROL 
-    WHERE status = 'COMPLETED' 
-    ORDER BY end_time DESC 
-    LIMIT 1
-);
-
-CREATE INDEX idx_conn_service_metrics ON FACT_CONNECTION (service_id)
-INCLUDE (duration, source_bytes, dest_bytes)
-WHERE batch_id IN (
-    SELECT batch_id 
-    FROM ETL_CONTROL 
-    WHERE status = 'COMPLETED' 
-    ORDER BY end_time DESC 
-    LIMIT 1
-);
+-- Create general indexes
+CREATE INDEX IF NOT EXISTS idx_conn_time_range ON FACT_CONNECTION (time_id, service_id);
+CREATE INDEX IF NOT EXISTS idx_conn_service_metrics ON FACT_CONNECTION (service_id)
+INCLUDE (duration, source_bytes, dest_bytes);
 
 -- Example usage:
 COMMENT ON PROCEDURE etl_load_connection_facts IS 
@@ -270,3 +374,30 @@ CALL etl_load_connection_facts(10000);  -- Process in batches of 10000
 CALL validate_connection_facts(v_batch_id);
 COMMIT;
 $doc$;
+
+BEGIN;
+CALL initialize_fact_tables('2014-01-01'::timestamp, '2025-01-01'::timestamp);
+CALL etl_load_connection_facts(10000);
+COMMIT;
+
+-- Check loaded records
+SELECT COUNT(*) as total_records FROM FACT_CONNECTION;
+
+-- Check distribution across partitions
+SELECT 
+    tableoid::regclass as partition_name,
+    COUNT(*) as record_count
+FROM FACT_CONNECTION
+GROUP BY tableoid;
+
+-- Check ETL control status
+SELECT 
+    batch_id,
+    status,
+    records_processed,
+    start_time,
+    end_time,
+    error_message
+FROM ETL_CONTROL
+ORDER BY batch_id DESC
+LIMIT 1;
