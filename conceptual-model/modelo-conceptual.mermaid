@@ -1,0 +1,215 @@
+erDiagram
+    CONNECTION_FACT {
+        int connection_id PK
+        int time_id FK
+        int service_id FK
+        int source_port_id FK
+        int dest_port_id FK
+        int state_id FK
+        int protocol_id FK
+        int attack_id FK
+        float duration
+        int source_bytes
+        int dest_bytes
+        int source_packets
+        int dest_packets
+        float source_load
+        float dest_load
+        int source_ttl
+        int dest_ttl
+        int source_loss
+        int dest_loss
+        int ct_srv_src
+        int ct_srv_dst
+        int ct_state_ttl
+    }
+
+    HOURLY_TRAFFIC_FACT {
+        int time_id FK
+        int service_id FK
+        int protocol_id FK
+        int attack_id FK
+        int total_connections
+        int normal_connections
+        int attack_connections
+        float avg_duration
+        float avg_duration_normal
+        float avg_duration_attack
+        int total_bytes_normal
+        int total_bytes_attack
+        int total_packets_normal
+        int total_packets_attack
+        float avg_bytes_per_conn
+        float avg_bytes_per_attack
+        float avg_load_normal
+        float avg_load_attack
+        int distinct_services
+        int distinct_ports
+    }
+
+    DAILY_TRAFFIC_FACT {
+        int time_id FK
+        int service_id FK
+        int protocol_id FK
+        int attack_id FK
+        int total_connections
+        int normal_connections
+        int attack_connections
+        float avg_duration
+        int total_bytes
+        int total_packets
+        float peak_hour_connections
+        int distinct_attack_types
+        float attack_percentage
+    }
+
+    MONTHLY_TRAFFIC_FACT {
+        int time_id FK
+        int service_id FK
+        int protocol_id FK
+        int attack_id FK
+        int total_connections
+        int normal_connections
+        int attack_connections
+        float avg_duration
+        int total_bytes
+        int total_packets
+        float peak_day_connections
+        int distinct_attack_types
+        float attack_percentage
+    }
+
+    SERVICE_STATS_FACT {
+        int service_id FK
+        int time_id FK
+        int protocol_id FK
+        int attack_id FK
+        int total_connections
+        int normal_connections
+        int attack_connections
+        int distinct_attack_types
+        float attack_percentage
+        float avg_duration
+        float avg_duration_normal
+        float avg_duration_attack
+        float duration_ratio
+        int total_bytes_normal
+        int total_bytes_attack
+        float bytes_ratio
+        int total_packets_normal
+        int total_packets_attack
+        float packets_ratio
+        float avg_bytes_per_conn
+        float avg_bytes_per_attack
+        int peak_hour_normal
+        int peak_hour_attack
+        int exclusive_attack_ports
+    }
+
+    PORT_USAGE_FACT {
+        int port_id FK
+        int service_id FK
+        int protocol_id FK
+        int attack_id FK
+        int time_id FK
+        int total_usage
+        int normal_usage
+        int attack_usage
+        float usage_percentage
+        float attack_percentage
+        boolean exclusive_to_attacks
+        string primary_attack_type
+        datetime first_seen
+        datetime last_seen
+        int distinct_services
+    }
+
+    TIME {
+        int time_id PK
+        datetime datetime
+        int hour
+        int day
+        int month
+        int year
+        string day_type
+        boolean is_business_hour
+    }
+
+    SERVICE {
+        int service_id PK
+        string name
+        string protocol
+        string service_type
+        string category
+        text description
+        boolean is_active
+        datetime valid_from
+        datetime valid_to
+    }
+
+    PORT {
+        int port_id PK
+        int port_number
+        string range_type
+        string default_service
+        boolean is_active
+        datetime valid_from
+        datetime valid_to
+    }
+
+    STATE {
+        int state_id PK
+        string name
+        string category
+        boolean is_active
+    }
+
+    PROTOCOL {
+        int protocol_id PK
+        string name
+        string type
+        boolean is_active
+    }
+
+    ATTACK {
+        int attack_id PK
+        string category
+        boolean is_attack
+        int severity
+        string description
+        boolean is_active
+    }
+
+    CONNECTION_FACT }|--|| TIME : "occurs at"
+    CONNECTION_FACT }|--|| SERVICE : "uses"
+    CONNECTION_FACT }|--|| PORT : "source"
+    CONNECTION_FACT }|--|| PORT : "destination"
+    CONNECTION_FACT }|--|| STATE : "has"
+    CONNECTION_FACT }|--|| PROTOCOL : "uses"
+    CONNECTION_FACT }|--|| ATTACK : "classified as"
+
+    HOURLY_TRAFFIC_FACT }|--|| TIME : "measured at"
+    HOURLY_TRAFFIC_FACT }|--|| SERVICE : "for service"
+    HOURLY_TRAFFIC_FACT }|--|| PROTOCOL : "uses"
+    HOURLY_TRAFFIC_FACT }|--|| ATTACK : "by category"
+
+    DAILY_TRAFFIC_FACT }|--|| TIME : "measured at"
+    DAILY_TRAFFIC_FACT }|--|| SERVICE : "for service"
+    DAILY_TRAFFIC_FACT }|--|| PROTOCOL : "uses"
+    DAILY_TRAFFIC_FACT }|--|| ATTACK : "by category"
+
+    MONTHLY_TRAFFIC_FACT }|--|| TIME : "measured at"
+    MONTHLY_TRAFFIC_FACT }|--|| SERVICE : "for service"
+    MONTHLY_TRAFFIC_FACT }|--|| PROTOCOL : "uses"
+    MONTHLY_TRAFFIC_FACT }|--|| ATTACK : "by category"
+
+    SERVICE_STATS_FACT }|--|| SERVICE : "for service"
+    SERVICE_STATS_FACT }|--|| TIME : "for period"
+    SERVICE_STATS_FACT }|--|| PROTOCOL : "uses"
+    SERVICE_STATS_FACT }|--|| ATTACK : "by category"
+
+    PORT_USAGE_FACT }|--|| PORT : "for port"
+    PORT_USAGE_FACT }|--|| SERVICE : "by service"
+    PORT_USAGE_FACT }|--|| TIME : "for period"
+    PORT_USAGE_FACT }|--|| PROTOCOL : "uses"
+    PORT_USAGE_FACT }|--|| ATTACK : "by category"
